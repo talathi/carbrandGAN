@@ -18,8 +18,6 @@ warnings.filterwarnings("ignore")
 
 HOME = os.environ['HOME']
 
-# Option that seems to work reasonably well
-# python dcgan.py DCGAN --latentDim 100 --batchSize 32 --channels 512 --lr 0.0001 --train
 
 
 if __name__ == "__main__":
