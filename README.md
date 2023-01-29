@@ -9,6 +9,7 @@ Gan model to synthesize car images
 1. Hinge Loss  + Gradient Pentaly + EMA smoothing + Cosine Similarity (optional)
 2. Progressive Training with Latent Dimension Modulation
 3. Dual Learning Rate: lrG = 0.0001; lrD=0.0004
+4. Adam Optimizer
 ## Network
 1. Fully convolutional (like DCGAN)
 2. With Spectral Norm and Mish Nonlinearity
