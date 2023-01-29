@@ -12,5 +12,5 @@ Center Crop: 256 x 158
 ## Network
 1. Fully convolutional (like DCGAN)
 2. With Spectral Norm and Mish Nonlinearity
-3. Optinal-- Choise to use self-attention
+3. Optional-- Choise to use self-attention
 
