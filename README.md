@@ -4,7 +4,7 @@ Gan model to synthesize car images
 ## Data
 1. Data: https://www.kaggle.com/datasets/yamaerenay/100-images-of-top-50-car-brands
 2. Data Preprocessing: Manual inspection of images per folder and removing false images such as Jaguar the animal; multiple cars in a single image and car logo etc..
-Center Crop: 256 x 158
+3. Variable image resolution; Center Crop: 256 x 158 (preserve aspect ratio to mean image resolution)
 ## Model Training:
 1. Hinge Loss  + Gradient Pentaly + EMA smoothing + Cosine Similarity (optional)
 2. Progressive Training with Latent Dimension Modulation
