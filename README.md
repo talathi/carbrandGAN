@@ -9,7 +9,7 @@ Gan model to synthesize car images
   c. Average Image Resolution: 175 x 280 (aspect ration: 1.6)
 3. Variable image resolution; Resize: 128 x 224 (aspect ratio: 1.75)
 ## Model Training:
-1. Hinge Loss  + Gradient Pentaly + EMA smoothing + Conditional + Cosine Similarity (optional)
+1. Hinge Loss  + Gradient Pentaly + EMA smoothing + Conditional 
 2. Progressive Training with Latent Dimension Modulation coupled with Differential Augmentation
 3. Dual Learning Rate: lrG = 0.0001; lrD=0.0004
 4. Adam Optimizer
