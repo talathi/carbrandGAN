@@ -7,7 +7,7 @@ Gan model to synthesize car images
   * Original Dataset has 4579 images; Outlier images removed: 915 
   * Total Images available for Training: 3664
   * Average Image Resolution: 175 x 280 (aspect ration: 1.6)
-3. Variable image resolution; Resize: 128 x 224 (aspect ratio: 1.75)
+3. Resize: 128 x 224 (aspect ratio: 1.75)
 ## Model Training:
 1. Hinge Loss  + Gradient Pentaly + EMA smoothing + Conditional 
 2. Progressive Training with Latent Dimension Modulation coupled with Differential Augmentation
