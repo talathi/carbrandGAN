@@ -17,8 +17,14 @@ Gan model to synthesize car images
 ## Network
 1. Fully convolutional (like DCGAN)
 2. With Spectral Norm and Mish Nonlinearity
-3. Optional-- Choise to use self-attention
+## Results
 
+## Potential Improvements
+1. Train for a longer time (may be 300-500 epochs per latent dimension size)
+2. Consider further cleaning of data to remove front facing and back facing images
+3. Modify network architecture to incorporate style elements --stylegan or later iterations, possibly starting with pre-trained version of these
+4. Modify network architecture to incorporate self attention-- SAGAN type network architecture
+5. Add cosine similarity loss to further boost image variability
 
 
 
