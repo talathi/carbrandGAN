@@ -24,8 +24,9 @@ Gan model to synthesize car images
 2. Consider further cleaning of data to remove front facing and back facing images
 3. Modify network architecture to incorporate style elements --stylegan or later iterations, possibly starting with pre-trained version of these
 4. Modify network architecture to incorporate self attention-- SAGAN type network architecture
-5. Add cosine similarity loss to further boost image variability
-6. New direction could be to possibly explore stable-diffusion framework to synthesize images from text prompts using pre-trained models from huggingface
+5. Consider extensions of conditional GAN by incorporating auxillary classifier loss and improved versions there of.
+6. Add cosine similarity loss to further boost image variability
+7. New direction could be to possibly explore stable-diffusion framework to synthesize images from text prompts using pre-trained models from huggingface
 
 
 
