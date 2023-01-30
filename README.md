@@ -4,9 +4,9 @@ Gan model to synthesize car images
 ## Data
 1. Data: https://www.kaggle.com/datasets/yamaerenay/100-images-of-top-50-car-brands
 2. Data Preprocessing: Manual inspection of images per folder and removing false images such as Jaguar the animal; multiple cars in a single image; car logo; skewed aspect ratio etc..
-  a. Original Dataset has 4579 images; Outlier images removed: 915 
-  b. Total Images available for Training: 3664
-  c. Average Image Resolution: 175 x 280 (aspect ration: 1.6)
+  * Original Dataset has 4579 images; Outlier images removed: 915 
+  * Total Images available for Training: 3664
+  * Average Image Resolution: 175 x 280 (aspect ration: 1.6)
 3. Variable image resolution; Resize: 128 x 224 (aspect ratio: 1.75)
 ## Model Training:
 1. Hinge Loss  + Gradient Pentaly + EMA smoothing + Conditional 
