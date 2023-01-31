@@ -20,7 +20,7 @@ Gan model to synthesize car images
 ## Results
 
 ## Potential Improvements
-1. Train for a longer time (may be 300-500 epochs per latent dimension size or longer)
+1. Train for a longer time (may be 300 epochs per latent dimension size or longer..which translates to about ~38000 iteration (with batch size of 32).. for total training iterations of about 160000.
 2. Consider further cleaning of data to remove front facing and back facing images
 3. Modify network architecture to incorporate style elements --stylegan or later iterations, possibly starting with pre-trained version of these
 4. Modify network architecture to incorporate self attention-- SAGAN type network architecture
