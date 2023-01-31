@@ -24,7 +24,7 @@ Gan model to synthesize car images
 3. Conditional training allows for synthesis of cars based on input class 
 4. Differential augmentation is a data augmentation technique to improve stability of gan training in presence of limited training samples.
 5. Spectral Norm and Mish nonlinearity (~differential version of relu nonlinearity) further boost stability of gan training
-
+6. Ideally want to do progressive training starting with learn high level features at lower resolution and increasing image resolution,but given the time constraints, I chose to implement latent dim version of progressive training.. progressively increasing latent dimension as training progresses to increase model complexity gradually to allow for the model to produce rich variety of images
 ## Results
 
 ## Potential Improvements
