@@ -26,7 +26,7 @@ Gan model to synthesize car images
 5. Spectral Norm and Mish nonlinearity (~differential version of relu nonlinearity) further boost stability of gan training
 6. Ideally want to do progressive training starting with learn high level features at lower resolution and increasing image resolution,but given the time constraints, I chose to implement latent dim version of progressive training.. progressively increasing latent dimension as training progresses to increase model complexity gradually to allow for the model to produce rich variety of images
 ## Results
-![Alt text](relative/images/DiscLoss.png?raw=true "Discriminator Loss")
+![alt text](https://github.com/talathi/carbrandGAN/blob/master/images/DiscLoss.png?raw=true)
 ## Potential Improvements
 1. Train for a longer time (may be 300 epochs per latent dimension size or longer..which translates to about ~38000 iteration (with batch size of 32).. for total training iterations of about 160000.
 2. Consider further cleaning of data to remove front facing and back facing images
