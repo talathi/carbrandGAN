@@ -51,8 +51,10 @@ python . <Model Folder Name> --hinge --logFreq 100 --lr 0.0001 --activation --nu
 ![Screenshot](images/DiscLoss.png)
  #### Generator Loss
 ![Screenshot](images/GenLoss.png)
- #### Synthesize Random Images
+ #### Synthesize Random Images -128x256
 ![Screenshot](images/RandomGeneratedImages.png)
+ #### Synthesis of Random Images -- 128x128 (trained odel with tight crop)
+ ![Screenshot](images/TightCrop_Model.png)
  #### Synthesize a single image for class label 49
 ![Screenshot](images/image_-1--1-49.png)
 
