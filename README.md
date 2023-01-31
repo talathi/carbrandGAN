@@ -17,6 +17,14 @@ Gan model to synthesize car images
 ## Network
 1. Fully convolutional (like DCGAN)
 2. With Spectral Norm and Mish Nonlinearity
+
+## Motivation for choice for training and network
+1. Hinge Gan Loss penalizes synthesis of similar images .. helps reduce mode collapse; 
+2. Gradient loss, Ema Smoothing improve training stablity
+3. Conditional training allows for synthesis of cars based on input class 
+4. Differential augmentation is a data augmentation technique to improve stability of gan training in presence of limited training samples.
+5. Spectral Norm and Mish nonlinearity (~differential version of relu nonlinearity) further boost stability of gan training
+
 ## Results
 
 ## Potential Improvements
