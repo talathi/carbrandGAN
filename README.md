@@ -38,8 +38,13 @@ Gan model to synthesize car images
 7. New direction could be to possibly explore stable-diffusion framework to synthesize images from text prompts using pre-trained models from huggingface
 
 
+## Training:
 
-
+python . <Model Folder Name> --hinge --logFreq 100 --lr 0.0001 --activation --numEpochs 400 --ema --diffAug --proTrain --latentDim 200 --activation --conditional
+ 
+## Evaluation
+ To synthesize random images
+python . <Model Folder Name> --eval --latentDim 300 --Dcheckpoint <Discriminator Checkpoint> --Gcheckpoint <Generator Checkpoint> --conditional --labelIndex -1
 
 ## Results
 ![Screenshot](images/DiscLoss.png)
