@@ -44,7 +44,7 @@ python . <Model Folder Name> --hinge --logFreq 100 --lr 0.0001 --activation --nu
  
 ## Evaluation
  To synthesize random images
-python . <Model Folder Name> --eval --latentDim 300 --Dcheckpoint <Discriminator Checkpoint> --Gcheckpoint <Generator Checkpoint> --conditional --labelIndex -1
+* python . <Model Folder Name> --eval --latentDim 300 --Dcheckpoint <Discriminator Checkpoint> --Gcheckpoint <Generator Checkpoint> --conditional --labelIndex -1
 
 ## Results
 ![Screenshot](images/DiscLoss.png)
