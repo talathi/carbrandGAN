@@ -40,11 +40,11 @@ Gan model to synthesize car images
 
 ## Training:
 
-python . <Model Folder Name> --hinge --logFreq 100 --lr 0.0001 --activation --numEpochs 400 --ema --diffAug --proTrain --latentDim 100 --activation --conditional
+python . \<Model Folder Name\> --hinge --logFreq 100 --lr 0.0001 --activation --numEpochs 400 --ema --diffAug --proTrain --latentDim 100 --activation --conditional
  
 ## Evaluation
  To synthesize random images
-* python . <Model Folder Name> --eval --latentDim 300 --Dcheckpoint <Discriminator Checkpoint> --Gcheckpoint <Generator Checkpoint> --conditional --labelIndex -1
+* python . \<Model Folder Name\> --eval --latentDim 300 --Dcheckpoint \<Discriminator Checkpoint\> --Gcheckpoint \<Generator Checkpoint\> --conditional --labelIndex -1
 
 ## Results
  #### Discriminator Loss
