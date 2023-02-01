@@ -1,36 +1,36 @@
+import sys
 import torch
 import numpy as np
 import torch.nn as nn
 import time
 from torch_intermediate_layer_getter import IntermediateLayerGetter as MidGetter
-
-from helperFn import gaussianLatent, initWeigthts, sampleImage, pdmpLoss, EMA, compute_gradient_penalty
-from helperFn import transferWeights
-from models import CNNNetwork
-from dataLoaders import celebaHQDataloader
+from helperFn import gaussianLatent, initWeigthts, sampleImage, pdmpLoss, EMA, compute_gradient_penalty, transferWeights
 from diffaug import DiffAugment
-policy ='color,translation'
+from models import CNNNetwork
+policy = 'color,translation,cutout'
 
-def allowEMA(generator, discriminator,smoothingFactor=0.9):
+
+def allowEMA(generator, discriminator, smoothingFactor=0.9):
     movingAverageG = EMA(smoothingFactor)
     movingAverageD = EMA(smoothingFactor)
     movingAverageD.register(discriminator)
     movingAverageG.register(generator)
     return movingAverageD, movingAverageG
 
-### Initial set up for GAN Training
-def initialSetup(network, device, trainConfig, Gcheckpoint, Dcheckpoint, init=True, ema=False):
+# Initial set up for GAN Training
+
+
+def initialSetup(network, device, trainConfig, Gcheckpoint, Dcheckpoint, ema=False):
     discriminator = network.discriminator.train().to(device)
     generator = network.generator.train().to(device)
     movingAverageD = None
     movingAverageG = None
 
     if ema:
-        movingAverageD, movingAverageG = allowEMA(generator,discriminator)   
+        movingAverageD, movingAverageG = allowEMA(generator, discriminator)
 
     discriminator.apply(initWeigthts)
-    if init:
-        generator.apply(initWeigthts)
+    generator.apply(initWeigthts)
 
     optimizerG = torch.optim.Adam(
         generator.parameters(), lr=trainConfig['lr'], betas=(0.5, 0.999))
@@ -49,16 +49,16 @@ def initialSetup(network, device, trainConfig, Gcheckpoint, Dcheckpoint, init=Tr
 
     return generator, discriminator, optimizerG, optimizerD, movingAverageG, movingAverageD
 
-### Update the setup to modify GAN architecture-- For progressive training
 
-def updateNetwork(generator, discriminator, layerCount, latentDim, trainConfig, activation, device,ema=False,freeze=False):
+def updateNetwork(generator, discriminator, channels, latentDim, trainConfig, device, ema=False,
+                  activation=nn.Mish(inplace=True),conditional=False):
     movingAverageD = None
-    movingAverageG = None  
-    network = CNNNetwork(512, latentDim, layerCount=layerCount, attention=False,
-                        activationG=activation, activationD=False)
-    generator = transferWeights(generator, network.generator,freeze=freeze)
+    movingAverageG = None
+    network = CNNNetwork(channels, latentDim,  attention=False,
+                         activationG=activation, activationD=False,conditional=conditional)
+    generator = transferWeights(generator, network.generator, freeze=False)
     discriminator = transferWeights(
-        discriminator, network.discriminator,freeze=freeze)
+        discriminator, network.discriminator, freeze=False)
 
     generator = generator.train().to(device)
     discriminator = discriminator.train().to(device)
@@ -67,22 +67,23 @@ def updateNetwork(generator, discriminator, layerCount, latentDim, trainConfig, 
         generator.parameters(), lr=trainConfig['lr'], betas=(0.5, 0.999))
     optimizerD = torch.optim.Adam(
         discriminator.parameters(), lr=4*trainConfig['lr'], betas=(0.5, 0.999))
-    
+
     if ema:
-         movingAverageD, movingAverageG = allowEMA(generator,discriminator)
+        movingAverageD, movingAverageG = allowEMA(generator, discriminator)
 
     return generator, discriminator, optimizerG, optimizerD, movingAverageG, movingAverageD
 
 
-def train(trainConfig, latentDim, network, dataloader, activation, device,
-          Gcheckpoint=None, Dcheckpoint=None, startEpoch=0, init=True, relativistic=False, hinge=False,
-          attention=False, ema=False, relativisticHinge=False, layerCount=5, diffAug=False,proTrain=False,sim=False):
+def train(trainConfig, channels, latentDim, network, dataloader, device,
+          Gcheckpoint=None, Dcheckpoint=None, startEpoch=0, hinge=False,
+          ema=False, sim=False, diffAug=False, activation=nn.Mish(inplace=True), 
+          proTrain=False,conditional=False,class_dim=50):
 
     generator, discriminator, optimizerG, optimizerD, movingAverageG, movingAverageD = initialSetup(
-        network, device, trainConfig, Gcheckpoint, Dcheckpoint, init=init, ema=ema)
+        network, device, trainConfig, Gcheckpoint, Dcheckpoint, ema=ema)
 
     # define midLayer getter
-    layerofInterest = 2*layerCount if layerCount >0 else 2
+    layerofInterest = 10
     return_layers = {'convBlock.%d' % layerofInterest: 'LeakyReLU'}
     mid_getter = MidGetter(
         discriminator, return_layers=return_layers, keep_output=False)
@@ -98,62 +99,47 @@ def train(trainConfig, latentDim, network, dataloader, activation, device,
     startTime = time.time()
     DLoss = []
     GLoss = []
-    imgSize = trainConfig['imgSize']
 
     for epoch in range(startEpoch, trainConfig['numEpochs']):
         if proTrain:
-            if epoch % 50 == 0 and epoch != 0:
-                if latentDim<100:
-                    break
-            
-                latentDim = latentDim-100 
-                generator, discriminator, optimizerG, optimizerD,movingAverageG, movingAverageD = updateNetwork(
-                    generator, discriminator, layerCount, latentDim, trainConfig, activation, device, ema=ema,freeze=False)
+            if epoch % 100 == 0 and epoch != 0:
+                latentDim = latentDim+100
+                if latentDim < 100:
+                    return DLoss, GLoss
 
-                # celebTrain = celebaHQDataloader(imgSize=imgSize)
-                # celebTrain.getDataloader()
-                # dataloader = celebTrain.dataloader
+                generator, discriminator, optimizerG, optimizerD, movingAverageG, movingAverageD = updateNetwork(
+                    generator, discriminator, channels, latentDim, trainConfig, device, ema=ema, 
+                    activation=activation,conditional=conditional)
 
         DBLoss = []
         GBLoss = []
         for batchID, (imgs, realclass) in enumerate(dataloader):
             # Train Discrinimator:
+
             imgs = imgs.to(device)
             if diffAug:
-                imgs = DiffAugment(imgs,policy)
-
+                imgs = DiffAugment(imgs, policy)
             realclass = realclass.to(device)
 
-            for runs in range(1):
-                imgLabels = discriminator(imgs)
+            for _ in range(2):
+                imgLabels = discriminator(imgs,realclass)
 
                 z = gaussianLatent(trainConfig['batchSize'], latentDim, device)
-                fakeimgs = generator(z)
+                fakeclass = torch.randint(0,class_dim,(trainConfig['batchSize'],)).to(device)
+                fakeimgs = generator(z,fakeclass)
                 if diffAug:
-                    fakeimgs = DiffAugment(fakeimgs,policy)
+                    fakeimgs = DiffAugment(fakeimgs, policy)
+                fakeimgLabels = discriminator(fakeimgs.detach(),fakeclass)
 
-                fakeimgLabels = discriminator(fakeimgs.detach())
-    
-                if not relativistic and not hinge:
+                if hinge:
+                    dLoss = nn.ReLU()(1+fakeimgLabels).mean() + nn.ReLU()(1-imgLabels).mean()
+                else:
                     dLoss = GanLoss(imgLabels, realLabels) + \
                         GanLoss(fakeimgLabels, fakeLabels)
 
-                if relativistic:
-                    dLoss = GanLoss(imgLabels-fakeimgLabels.mean(dim=0, keepdim=True), realLabels) + \
-                        GanLoss(fakeimgLabels-imgLabels.mean(dim=0,
-                                keepdim=True), fakeLabels)
-
-                if hinge:
-                    # min(0,-y) = - max(0,y)
-                    dLoss = nn.ReLU()(1+fakeimgLabels).mean() + nn.ReLU()(1-imgLabels).mean()
-
-                if relativisticHinge:
-                    dLoss = nn.ReLU()(1+(fakeimgLabels-imgLabels.mean(dim=0, keepdim=True))).mean()
-                    + nn.ReLU()(1-(imgLabels-fakeimgLabels.mean(dim=0, keepdim=True))).mean()
-
                 # Add gradient penalty
                 gpLoss = compute_gradient_penalty(
-                    discriminator, imgs, fakeimgs, device)
+                    discriminator, imgs,realclass, fakeimgs, device)
                 dLoss = dLoss + gpLoss
 
                 optimizerD.zero_grad()
@@ -165,39 +151,27 @@ def train(trainConfig, latentDim, network, dataloader, activation, device,
 
             # Train Generator
             z = gaussianLatent(trainConfig['batchSize'], latentDim, device)
-            fakeclass = torch.randint_like(realclass, 0, 2).to(device)
-            fakeimgs = generator(z)
+            fakeclass = torch.randint(0,class_dim,(trainConfig['batchSize'],)).to(device)
+            fakeimgs = generator(z,fakeclass)
             if diffAug:
-                fakeimgs = DiffAugment(fakeimgs,policy)
+                fakeimgs = DiffAugment(fakeimgs, policy)
 
-            fakeimgLabels = discriminator(fakeimgs)
-
-          
-            mid_outputs, _ = mid_getter(fakeimgs)
+            fakeimgLabels = discriminator(fakeimgs,fakeclass)
+            mid_outputs, _ = mid_getter(fakeimgs,fakeclass)
             layers = list(mid_outputs.items())[0][1]
-            
+
             if sim:
                 pdLoss = pdmpLoss(z, layers)
             else:
                 pdLoss = torch.zeros(1).to(device).item()
 
-            if not relativistic and not hinge:
+            if hinge:
+                adversarialLoss = -fakeimgLabels.mean()
+            else:
                 adversarialLoss = GanLoss(
                     fakeimgLabels, realLabels)
 
-            if relativistic:
-                imgLabels = discriminator(imgs).detach()
-                adversarialLoss = GanLoss(
-                    fakeimgLabels-imgLabels.mean(dim=0, keepdim=True), realLabels)
-            if hinge:
-                adversarialLoss = -fakeimgLabels.mean()
-
-            if relativisticHinge:
-                adversarialLoss = - \
-                    (fakeimgLabels-realLabels.mean(dim=0, keepdim=True)).mean()
-
             gLoss = adversarialLoss + .1*pdLoss
-
             optimizerG.zero_grad()
             gLoss.backward()
             optimizerG.step()
@@ -208,12 +182,12 @@ def train(trainConfig, latentDim, network, dataloader, activation, device,
             DBLoss.append(dLoss.item())
             GBLoss.append(gLoss.item())
 
-            if trainConfig['consoleLogFreq'] is not None and batchID % trainConfig['consoleLogFreq'] == 0 and batchID!=0:
+            if trainConfig['consoleLogFreq'] is not None and batchID % trainConfig['consoleLogFreq'] == 0 and batchID != 0:
                 batch = batchID+1/len(dataloader)
                 ep = epoch+1
 
                 sampleImage(
-                    generator, trainConfig['saveDir'], 36, 6, latentDim, device, ep, batch)
+                    generator, trainConfig['saveDir'], 36, 6, latentDim, device, ep, batch,class_dim=class_dim)
                 print('Gan Training: Time Elapses %.2f s |epoch=%d, batch=%d' %
                       ((time.time()-startTime), ep, batch))
                 print('GLoss: %.3f DLoss: %.3f AdversarialLoss: %.3f PDLoss: %.3f' % (
@@ -223,7 +197,7 @@ def train(trainConfig, latentDim, network, dataloader, activation, device,
         DLoss.append(np.mean(DBLoss))
         GLoss.append(np.mean(GBLoss))
 
-        if epoch % 24 == 0:
+        if epoch % 48 == 0:
             GcheckpointName = 'gModel-%d.pt' % epoch
             DcheckpointName = 'dModel-%d.pt' % epoch
 

@@ -1,3 +1,4 @@
+import os,sys
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
@@ -7,10 +8,11 @@ from einops.layers.torch import Rearrange
 
 from helperFn import GaussianNoise, SpectralNorm, MiniBatchStdDev
 
+from kornia.filters import filter2d
 
 class selfAttention(nn.Module):
     """ Self attention Layer"""
-
+    ## May use not sure
     def __init__(self, in_dim):
         super().__init__()
         self.query_conv = nn.Conv2d(
@@ -32,19 +34,31 @@ class selfAttention(nn.Module):
         return out
 
 
-# Define a Scaled Conv Block Module-- Scaling factor is input to the block
-
-
 # Define Transpose Conv Module with Spectralnorm
 
-
+class Blur(nn.Module):
+    def __init__(self):
+        super().__init__()
+        f = torch.Tensor([1, 2, 1])
+        self.register_buffer('f', f)
+    def forward(self, x):
+        f = self.f
+        f = f[None, None, :] * f [None, :, None]
+        return filter2d(x, f, normalized=True)
+    
 def conv2DTransposeBlock(in_channels, out_channels, kernel=(5, 4), stride=2, padding=1,
-                         normalize=True, activation=nn.SELU(inplace=True), attention=False):
+                         normalize=True, activation=nn.SELU(inplace=True), attention=False,convTranspose=True):
     # look into whether to add bias or not
-    conv2DUpsample = nn.ConvTranspose2d(
-        in_channels, out_channels, kernel, stride, padding, bias=False)
-    layers = [SpectralNorm(conv2DUpsample)]
-
+    if convTranspose:
+        conv2DUpsample = nn.ConvTranspose2d(
+            in_channels, out_channels, kernel, stride, padding, bias=False)
+        layers = [SpectralNorm(conv2DUpsample)]
+    else:
+        layers = []
+        m = nn.Upsample(scale_factor=stride, mode='nearest')
+        conv2D = nn.Conv2d(in_channels,out_channels,1,groups = 1) 
+        layers.extend([SpectralNorm(conv2D),m,Blur()])
+    
     if normalize:
         layers.append(nn.BatchNorm2d(out_channels))
 
@@ -64,10 +78,12 @@ def conv2DBlock(in_channels, out_channels, kernel=4, stride=2, padding=1,
                 specNorm=True, activation=False, dropout=False, miniBatchNorm=False, attention=False):
     conv2DDownsample = nn.Conv2d(in_channels, out_channels, kernel_size=kernel, stride=stride, padding=padding,
                                  bias=False)
+    
+    layers = [Blur()]
     if specNorm:
-        layers = [SpectralNorm(conv2DDownsample)]
+        layers.append(SpectralNorm(conv2DDownsample))
     else:
-        layers = [conv2DDownsample]
+        layers.append(conv2DDownsample)
 
     if miniBatchNorm:
         layers.append(MiniBatchStdDev())
@@ -84,122 +100,79 @@ def conv2DBlock(in_channels, out_channels, kernel=4, stride=2, padding=1,
         layers.append(selfAttention(out_channels))
     return layers
 
-# Define a progressively growing Generator Module
 
 
-class celebCNNGenerator(nn.Module):
-    def __init__(self, channels=512, latent_dim=100, kernel=(5, 4), attention=False, activation=nn.Mish(inplace=True),
-                 layerCount=4):
-        super(celebCNNGenerator, self).__init__()
+class carsCNNGenerator(nn.Module):
+    def __init__(self, channels=512, latent_dim=100, kernel=4,class_dim=50, attention=False, 
+                activation=nn.Mish(inplace=True),conditional=False,convTranspose=True):
+        super(carsCNNGenerator, self).__init__()
         self.attention = attention
         self.channels = channels
-
-        kernel = 4
-        pad = 1
-        stride = 2
-
-        if layerCount < 0:
-            kernel = 1
-            stride = 1
-            pad = 0
-
-        # Common First Layer
-        sequential = nn.Sequential(nn.Linear(latent_dim, channels*(4*4)),
-                                   Rearrange('b (c h w)->b c h w', c=channels, h=4))
-
-        # Intermediate Layers, depending on the size of image to synthesize
-        moduleList = []
-        if layerCount > 1:
-            for i in range(layerCount):
-                if i == layerCount-1:
-                    outchannel = channels//2**i
-                else:
-                    outchannel = channels//2**(i+1)
-                moduleList.append(conv2DTransposeBlock(
-                    channels//2**i, outchannel, activation=activation, kernel=kernel, attention=False))
-
-        elif layerCount == 1:
-            i = 1
-            moduleList.append(conv2DTransposeBlock(
-                channels, channels//2**i, activation=activation, kernel=kernel, attention=False))
-
+        self.conditional = conditional
+        
+        if self.conditional:
+            linLayer = nn.Linear(latent_dim+class_dim,channels*(4*7))
+            self.embed = nn.Embedding(class_dim,class_dim)
         else:
-            i = 0
-
-        if len(moduleList) > 0:
-            for modules in moduleList:
-                for module in modules:
-                    sequential.add_module(str(len(sequential)), module)
-
-        # Final Layer
-        finalModule = conv2DTransposeBlock(
-            channels//2**i, 3, padding=pad, normalize=False, activation=nn.Tanh(), kernel=kernel, stride=stride)
-
-        for module in finalModule:
-            sequential.add_module(str(len(sequential)+1), module)
-        self.model = sequential
-
-    def forward(self, x):
+            linLayer = nn.Linear(latent_dim,channels*(4*7))
+        self.model = nn.Sequential(
+            linLayer,
+            Rearrange('b (c h w)->b c h w',c=channels,h=4),
+            *conv2DTransposeBlock(channels,channels//2,activation=activation,kernel=kernel,attention=False,
+                                  padding=1,stride=(2),convTranspose=convTranspose),
+            *conv2DTransposeBlock(channels//2,channels//4,activation=activation,kernel=kernel,attention = False,
+                                  padding=1,stride=(2),convTranspose=convTranspose),
+            *conv2DTransposeBlock(channels//4,channels//8,attention = False,activation=activation,kernel=(4),
+                                  padding=1,stride=(2),convTranspose=convTranspose),
+            *conv2DTransposeBlock(channels//8,channels//8,attention = False,activation=activation,kernel=(4),
+                                  padding=1,stride=(2),convTranspose=convTranspose),
+            *conv2DTransposeBlock(channels//8,3,normalize=False,attention = False,activation=nn.Tanh(),
+                                  kernel=(4),padding=1,stride=(2),convTranspose=convTranspose))
+    def forward(self, x,c=None):
+        ## synthesize image of size 128 x 224
+        if self.conditional:
+            y = self.embed(c)
+            x = torch.cat([x,y],dim=1)
         return self.model(x)
 
 
-class celebCNNDiscriminator(nn.Module):
-    def __init__(self, channels, attention=False, activation=False, layerCount=3):
-        super(celebCNNDiscriminator, self).__init__()
-        self.attention = attention
-
-        # First Layer
-        sequential = nn.Sequential(GaussianNoise(),
-                                   *conv2DBlock(3, channels, 4, 2,
-                                                1, activation=activation))
-
-        # Intermediate Layers
-        moduleList = []
-        firstConv = conv2DBlock(channels, channels, 4,
-                                2, 1, activation=activation)
-        if layerCount >= 0:
-            for module in firstConv:
-                sequential.add_module(str(len(sequential)), module)
-
-        if layerCount > 0:
-            for i in range(layerCount):
-                moduleList.append(conv2DBlock(
-                    channels*2**i, channels*2**(i+1), 4, 2, 1, activation=activation))
+class carsCNNDiscriminator(nn.Module):
+    def __init__(self, channels, attention=False, activation=False,conditional=False,class_dim=50):
+        super(carsCNNDiscriminator, self).__init__()
+        self.conditional = conditional
+        self.embed = nn.Embedding(class_dim,class_dim)
+        self.fc = nn.Sequential(nn.Linear(class_dim+2,1),nn.LeakyReLU(0.2,inplace=True))
+        if self.conditional:
+            self.lastkernel = (4)
         else:
-            i = -1
+            self.lastkernel = (4,6)
+        self.convBlock = nn.Sequential(
+        GaussianNoise(),
+        *conv2DBlock(3,channels,kernel=4,padding=1,activation=activation,stride=(2)),
+        *conv2DBlock(channels,channels,kernel=4,padding=1,activation=activation,stride=(2)),
+        *conv2DBlock(channels,channels*2,padding=1,activation=activation,stride=(2),kernel=(4)),
+        *conv2DBlock(channels*2,channels*4,padding=1,activation=activation,attention=False,stride=(2),kernel=(4)),
+        *conv2DBlock(channels*4,channels*8,padding=1,attention=False,activation=activation,stride=(2),kernel=(4)),
+        *conv2DBlock(channels*8,1,kernel=self.lastkernel,padding=0,specNorm=False,dropout=False,miniBatchNorm=False,
+                     activation=activation,stride=(2)),Rearrange('b c h w->b (c h w)'),)
 
-        if layerCount < -1:
-            pad = 1
+
+    def forward(self, x,c=None):
+        if self.conditional:
+            y = self.embed(c)
+            x= torch.cat([self.convBlock(x),y],dim=1)
+            x= self.fc(x)
+            return x
         else:
-            pad = 0
-
-        if len(moduleList) > 0:
-            for modules in moduleList:
-                for module in modules:
-                    sequential.add_module(str(len(sequential)), module)
-
-        # Common Final Layer
-        lastConv = conv2DBlock(channels*2**(i+1), 1, 4, 2, pad, specNorm=False,
-                               dropout=False, miniBatchNorm=False, activation=activation)
-
-        for module in lastConv:
-            sequential.add_module(str(len(sequential)), module)
-
-        sequential.add_module(str(len(sequential)),
-                              Rearrange('b c h w->b (c h w)'))
-
-        self.convBlock = sequential
-
-
-    def forward(self, x):
-        return self.convBlock(x)
+            return self.convBlock(x)
 
 
 # Defin the GAN Network
 class CNNNetwork():
-    def __init__(self, channels, latentDim=100, layerCount=4, attention=False, activationG=nn.Mish(inplace=True),
-                 activationD=False):
-        self.generator = celebCNNGenerator(channels=channels, latent_dim=latentDim,
-                                           activation=activationG, attention=attention,  layerCount=layerCount)
-        self.discriminator = celebCNNDiscriminator(
-            channels=channels//8, attention=attention, activation=activationD, layerCount=layerCount-1)
+    def __init__(self, channels, latentDim=100, attention=False, activationG=nn.Mish(inplace=True),
+                 activationD=False,conditional=False):
+        self.generator = carsCNNGenerator(channels=channels, latent_dim=latentDim,
+                                           activation=activationG, attention=attention,conditional=conditional,
+                                           convTranspose=False)
+        self.discriminator = carsCNNDiscriminator(
+            channels=channels//8, attention=attention, activation=activationD,conditional=conditional)

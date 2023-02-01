@@ -1,17 +1,17 @@
-from dataLoaders import celebaHQDataloader
-from models import CNNNetwork
-from trainer import train
-import pickle
-from torchsummary import summary
-import torch
-import torch.nn.functional as F
-import torch.nn as nn
-from einops import rearrange
-from helperFn import sampleImage
-
 import os
 import argparse
 import numpy as np
+import torch
+import torch.nn as nn
+
+from torchsummary import summary
+from einops import rearrange
+from models import CNNNetwork
+from helperFn import sampleImage
+from dataLoaders import carsDataloader
+from trainer import train
+import pickle
+
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -19,10 +19,9 @@ warnings.filterwarnings("ignore")
 HOME = os.environ['HOME']
 
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Train DCN Gan on CelebA dataset"
+        description="Train DCN Gan on car brands dataset"
     )
     parser.add_argument(
         "name", type=str, help="Name of the model for storing and loading purposes."
@@ -53,15 +52,18 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--imgSize", type=int, help="image size", default=128
+        "--labelIndex", type=int, help="less than 50", default=-1
     )
-
     parser.add_argument(
         "--lr", type=float, help="generator learning rate", default=0.0002
     )
 
     parser.add_argument(
         "--printarch", action="store_true", help="print architecture details"
+    )
+
+    parser.add_argument(
+        "--diffAug", action="store_true", help="use differential augmentation"
     )
 
     parser.add_argument(
@@ -78,16 +80,13 @@ if __name__ == "__main__":
 
     parser.add_argument("--activation", action="store_true",
                         help="default to relu")
-    
+
     parser.add_argument("--train", action="store_true", help="run training")
 
     parser.add_argument("--eval", action="store_true", help="run evaluation")
 
     parser.add_argument("--l2loss", action="store_true",
                         help="use l2loss; default is BCELogit")
-
-    parser.add_argument("--relativistic", action="store_true",
-                        help="use relativistic loss")
 
     parser.add_argument("--attention", action="store_true",
                         help="add self attention module to generator and discriminator")
@@ -98,17 +97,14 @@ if __name__ == "__main__":
     parser.add_argument("--ema", action="store_true",
                         help="apply exponential moving average smoothing")
 
-    parser.add_argument("--relativisticHinge", action="store_true",
-                        help="add relativistic hinge loss")
-
-    parser.add_argument("--diffAug", action="store_true",
-                        help="add relativistic hinge loss")
-
-    parser.add_argument("--proTrain", action="store_true",
-                        help="progressive Training using variable Latent Vector Size")
-    
     parser.add_argument("--sim", action="store_true",
                         help="invoke similarity loss to treat mode collapse")
+
+    parser.add_argument("--proTrain", action="store_true",
+                        help="progressive Training")
+
+    parser.add_argument("--conditional", action="store_true",
+                        help="conditional training")
 
     args = parser.parse_args()
     print(args)
@@ -128,41 +124,36 @@ if __name__ == "__main__":
         args.Dcheckpoint = saveDir+'/'+args.Dcheckpoint
 
     # Get Data and Define Dataloader
-    celebTrain = celebaHQDataloader(
-        batchSize=args.batchSize, imgSize=args.imgSize)
-    celebTrain.getDataloader()
+    cars = carsDataloader()
+    cars.getDataloader()
 
     # print data dimension
-    imgs, labels = next(iter(celebTrain.dataloader))
-    if len(labels.shape) == 1:
-        labels = rearrange(labels, '(c h)->c h', h=1)
+    imgs, labels = next(iter(cars.dataloader))
     print(imgs.shape, labels.shape, labels.dtype)
 
     # Get Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(device)
 
-
     if args.activation:
         activation = nn.Mish(inplace=True)
     else:
-        activation = nn.LeakyReLU(0.2,inplace=True)
-
-    layerCount = int(np.log(args.imgSize)/np.log(2))-3
-
+        activation = nn.LeakyReLU(0.2, inplace=True)
 
     # define Models
-    network = CNNNetwork(args.channels, args.latentDim, layerCount=layerCount, attention=args.attention,
-                        activationG=activation, activationD=False)
-    
-    
+    network = CNNNetwork(args.channels, args.latentDim,  attention=args.attention,
+                         activationG=activation, activationD=False,conditional=args.conditional)
+
+    imgSize = (158,256)
     if args.printarch:
-        imgSize = (2**(layerCount+3), 2**(layerCount+3))
-        print('Discriminator Network...')
-        summary(network.discriminator.to(device),
-                input_size=(3, imgSize[0], imgSize[1]))
-        print('\n\n Generator Network')
-        summary(network.generator.to(device), input_size=(args.latentDim,))
+        inputD = (3, imgSize[0], imgSize[1])
+        inputG = (args.latentDim,)
+        if not args.conditional:
+            print('Discriminator Network...')
+            summary(network.discriminator.to(device),
+                    input_size=inputD)
+            print('\n\n Generator Network')
+            summary(network.generator.to(device), input_size=inputG)
 
     # Define TrainConfig
     losstype = 'BCE'
@@ -177,17 +168,19 @@ if __name__ == "__main__":
         'saveDir': saveDir,
         'lossType': losstype,
         'lr': args.lr,
-        'imgSize': args.imgSize
     }
 
     if args.train:
-        DLoss, GLoss = train(trainingConfig, args.latentDim, network, celebTrain.dataloader, activation, device,
+        DLoss, GLoss = train(trainingConfig, args.channels,args.latentDim, network, cars.dataloader, device,
                              Gcheckpoint=args.Gcheckpoint, Dcheckpoint=args.Dcheckpoint,
-                             startEpoch=args.startEpoch, init=False,
-                             relativistic=args.relativistic, hinge=args.hinge,
-                             attention=args.attention, ema=args.ema,
-                             relativisticHinge=args.relativisticHinge,
-                             layerCount=layerCount, diffAug=args.diffAug, proTrain=args.proTrain,sim=args.sim)
+                             startEpoch=args.startEpoch,
+                             hinge=args.hinge,
+                             ema=args.ema,
+                             sim=args.sim,
+                             diffAug=args.diffAug,
+                             activation=activation,
+                             proTrain= args.proTrain,
+                             conditional=args.conditional)
 
         o = open('%s/trainData.pkl' % saveDir, 'wb')
         pickle.dump([DLoss, GLoss], o)
@@ -196,6 +189,9 @@ if __name__ == "__main__":
     if args.eval:
         assert args.Gcheckpoint is not None
         gModel = torch.load(args.Gcheckpoint)
-        network.generator.load_state_dict(gModel['model_state_dict'])
-        sampleImage(network.generator,
-                    trainingConfig['saveDir'], 36, 6, args.latentDim, device, -1, -1)
+        generator = network.generator.eval().to(device)
+        generator.load_state_dict(gModel['model_state_dict'])
+        
+        
+        sampleImage(generator,
+                    trainingConfig['saveDir'], 36, 6, args.latentDim, device, -1, -1,classlabel=args.labelIndex)

@@ -9,7 +9,6 @@ import torch
 
 from einops import rearrange
 
-from torchvision.models.inception import inception_v3
 
 
 import numpy as np
@@ -18,23 +17,10 @@ from scipy.stats import entropy
 
 HOME = os.environ['HOME']
 
-
-def transferWeights(refModel, newModel,freeze=True):
-    # refModel is a subset of newModel
-    newModelStateDict = {k: v for k, v in newModel.state_dict().items()}
-    refModelStateDict = {k: v for k, v in refModel.state_dict().items()}
-    refKeys = list(refModelStateDict.keys())
-    partialStatedict = {k: v for k, v in refModelStateDict.items(
-    ) if k in newModelStateDict.keys() and v.shape == newModelStateDict[k].shape}
-    missing=newModel.load_state_dict(partialStatedict,strict=False)
-    ## freeze pre-trained weigths in new model
-    if freeze:
-        for name, params in newModel.named_parameters():
-            if name in refKeys:
-                params.requires_grad=False
-        
-    return newModel
-
+def one_hot_encode(tensor, num_classes):
+    one_hot = torch.zeros(tensor.size(0), num_classes, dtype=torch.float32)
+    one_hot.scatter_(1, tensor.unsqueeze(1), 1)
+    return one_hot
 
 def computeSimilarity(x):
     simVal = []
@@ -54,19 +40,21 @@ def pdmpLoss(z, layer):
     return torch.mean(lS/zS)
 
 
-def sphericalInterpolation(t, p0, p1):
-    # t is the interpolation parameter in range [0,1]
-    # p0 and p1 are the two latent vectors
-    if t <= 0:
-        return p0
-    elif t >= 1:
-        return p1
-    elif np.allclose(p0, p1):
-        return p0
-
-    # Convert p0 and p1 to unit vectors and find the angle between them (omega)
-    omega = np.arccos(np.dot(p0 / np.linalg.norm(p0), p1 / np.linalg.norm(p1)))
-    return np.sin((1.0 - t) * omega) / np.sin(omega) * p0 + np.sin(t * omega) / np.sin(omega) * p1
+def transferWeights(refModel, newModel,freeze=True):
+    # refModel is a subset of newModel
+    newModelStateDict = {k: v for k, v in newModel.state_dict().items()}
+    refModelStateDict = {k: v for k, v in refModel.state_dict().items()}
+    refKeys = list(refModelStateDict.keys())
+    partialStatedict = {k: v for k, v in refModelStateDict.items(
+    ) if k in newModelStateDict.keys() and v.shape == newModelStateDict[k].shape}
+    missing=newModel.load_state_dict(partialStatedict,strict=False)
+    ## freeze pre-trained weigths in new model
+    if freeze:
+        for name, params in newModel.named_parameters():
+            if name in refKeys:
+                params.requires_grad=False
+        
+    return newModel
 
 
 class EMA(object):
@@ -105,23 +93,15 @@ class EMA(object):
         self.shadow = state_dict
 
 
-def getFIDscore(fid, real, fake, device):
-    assert real.shape[0] == fake.shape[0]
-    fake = (255 * (fake.clamp(-1, 1) * 0.5 + 0.5))
-    fake = fake.to(torch.uint8).to(device)
-    real = (255 * (real.clamp(-1, 1) * 0.5 + 0.5))
-    real = real.to(torch.uint8).to(device)
-    fid.update(real, real=True)
-    fid.update(fake, real=False)
-    return fid.compute().item()
-
-
-def reparameterization(mu, logvar, latent_dim, device):
-    std = torch.exp(logvar/2).to(device=device)
-    sampled_z = torch.randn((mu.size(0), latent_dim),
-                            requires_grad=True, device=device)
-    z = sampled_z*std + mu
-    return z
+# def getFIDscore(fid, real, fake, device):
+#     assert real.shape[0] == fake.shape[0]
+#     fake = (255 * (fake.clamp(-1, 1) * 0.5 + 0.5))
+#     fake = fake.to(torch.uint8).to(device)
+#     real = (255 * (real.clamp(-1, 1) * 0.5 + 0.5))
+#     real = real.to(torch.uint8).to(device)
+#     fid.update(real, real=True)
+#     fid.update(fake, real=False)
+#     return fid.compute().item()
 
 def show_images(dataset, num_samples=20, cols=4):
     """ Plots some samples from the dataset """
@@ -137,16 +117,26 @@ def show_images(dataset, num_samples=20, cols=4):
         plt.yticks([])
 
 
-def sampleImage(model, saveDir, batch, nRow, latentDim, device, epochs, batchesDone):
+def sampleImage(model, saveDir, batch, nRow, latentDim, device, epochs, batchesDone,realImgs=None,class_dim=50,classlabel=-1):
     imgDir = '%s/images' % saveDir
     if not os.path.isdir(imgDir):
         os.mkdir(imgDir)
-    z = gaussianLatent(batch, latentDim, device)
-    imgFake = model(z)
+    
+    if classlabel<0:
+        z = gaussianLatent(batch, latentDim, device)
+        fakeclass = torch.randint(0,class_dim,(batch,)).to(device)
+        label = 'rand'
+    else:
+        z = gaussianLatent(1, latentDim, device)
+        fakeclass=classlabel*torch.ones(1).to(torch.long).to(device)
+        label = str(classlabel)
+    imgFake = model(z,fakeclass)
 
-    save_image(imgFake, '%s/image_%d-%d.png' %
+    save_image(imgFake, '%s/image_%d-%d-%s.png' %
+               (imgDir, epochs, batchesDone,label), nrow=nRow, normalize=True)
+    if realImgs is not None:
+        save_image(realImgs, '%s/realimage_%d-%d.png' %
                (imgDir, epochs, batchesDone), nrow=nRow, normalize=True)
-
 
 def gaussianLatent(batchSize, latentDim, device):
     return torch.randn((batchSize, latentDim), device=device)
@@ -163,75 +153,18 @@ def initWeigthts(model):
         torch.nn.init.constant_(model.bias.data, 0.0)
 
 
-def inceptionScore(imgs, cuda=True, batch_size=32, resize=False, splits=1):
-    """Computes the inception score of the generated images imgs
-    imgs -- Torch dataset of (3xHxW) numpy images normalized in the range [-1, 1]
-    cuda -- whether or not to run on GPU
-    batch_size -- batch size for feeding into Inception v3
-    splits -- number of splits
-    """
-    N = len(imgs)
 
-    assert batch_size > 0
-    assert N > batch_size
-
-    # Set up dtype
-    if cuda:
-        dtype = torch.cuda.FloatTensor
-    else:
-        if torch.cuda.is_available():
-            print("WARNING: You have a CUDA device, so you should probably set cuda=True")
-        dtype = torch.FloatTensor
-
-    # Set up dataloader
-    dataloader = torch.utils.data.DataLoader(imgs, batch_size=batch_size)
-
-    # Load inception model
-    inception_model = inception_v3(
-        pretrained=True, transform_input=False).type(dtype)
-    inception_model.eval()
-    up = nn.Upsample(size=(299, 299), mode='bilinear',
-                     align_corners=True).type(dtype)
-
-    def get_pred(x):
-        if resize:
-            x = up(x)
-        x = inception_model(x)
-        return F.softmax(x, dim=1).data.cpu().numpy()
-
-    # Get predictions
-    preds = np.zeros((N, 1000))
-
-    for i, batch in enumerate(dataloader, 0):
-        batch = batch.type(dtype)
-        batchv = batch.to(device="cuda")
-        batch_size_i = batch.size()[0]
-
-        preds[i*batch_size:i*batch_size + batch_size_i] = get_pred(batchv)
-
-    # Now compute the mean kl-div
-    split_scores = []
-
-    for k in range(splits):
-        part = preds[k * (N // splits): (k+1) * (N // splits), :]
-        py = np.mean(part, axis=0)
-        scores = []
-        for i in range(part.shape[0]):
-            pyx = part[i, :]
-            scores.append(entropy(pyx, py))
-        split_scores.append(np.exp(np.mean(scores)))
-
-    return np.mean(split_scores), np.std(split_scores)
-
-
-def compute_gradient_penalty(D, real_samples, fake_samples, device):
+def compute_gradient_penalty(D, real_samples, real_classes,fake_samples, device,class_dim=50):
     """Calculates the gradient penalty loss for WGAN GP"""
     # Random weight term for interpolation between real and fake samples
     alpha = torch.rand((real_samples.shape[0], 1, 1, 1)).to(device)
+    alphac = torch.rand((real_classes.shape[0],)).to(device)
+    fake_classes = torch.randint(0,class_dim,(real_classes.shape[0],)).to(device)
     # Get random interpolation between real and fake samples
+    class_interpolate = (alphac*real_classes+(1-alphac)*fake_classes).to(torch.long).to(device)
     interpolates = (alpha * real_samples + ((1 - alpha)
                     * fake_samples)).requires_grad_(True)
-    d_interpolates = D(interpolates)
+    d_interpolates = D(interpolates,class_interpolate)
     fake = torch.ones(real_samples.shape[0], 1).to(device)
     # Get gradient w.r.t. interpolates
     gradients = torch.autograd.grad(
